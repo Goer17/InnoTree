@@ -20,6 +20,7 @@ class Context:
         return (
             f"[{self.key}]\n"
             f"{self.content}\n"
+            "[END]"
         )
     
     def __str__(self):

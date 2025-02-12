@@ -42,8 +42,8 @@ class IdeaArena(Rewarder):
                     "idea_B": ""
                 }
             )
+            self.sys_prompt = sys_prompt
         self.engine = engine
-        self.sys_prompt = sys_prompt
         self.idea_db = []
     
     async def combat(self,
@@ -77,6 +77,7 @@ class IdeaArena(Rewarder):
             else:
                 return False
         except Exception as e:
+            # Retry
             return await self.combat(
                 idea1=idea1,
                 idea2=idea2,

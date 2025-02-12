@@ -18,6 +18,15 @@ load_dotenv(find_dotenv())
 api_key = os.environ["API_KEY"]
 base_url = os.environ["BASE_URL"]
 
+deepseek_api_key = os.environ["DEEPSEEK_API_KEY"]
+deepseek_base_url = os.environ["DEEPSEEK_BASE_URL"]
+
+engine_list = {
+    "gpt-4o": LLMEngine(api_key=api_key, base_url=base_url, model="gpt-4o"),
+    "gpt-4o-mini": LLMEngine(api_key=api_key, base_url=base_url, model="gpt-4o-mini"),
+    "deepseek-chat": LLMEngine(api_key=deepseek_api_key, base_url=deepseek_base_url, model="deepseek-chat")
+}
+
 
 def main(opt):
     topic = opt.topic
@@ -26,11 +35,7 @@ def main(opt):
     n_rollouts = opt.n_rollouts
     n_exp = opt.n_exp
     
-    engine = LLMEngine(
-        api_key=api_key,
-        base_url=base_url,
-        model=model
-    )
+    engine = engine_list[model]
     
     generator = SciGenerator(
         engine=engine,

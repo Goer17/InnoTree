@@ -36,8 +36,9 @@ engine = LLMEngine(
 
 def test_engine():
     prompt = "Hello, glad to see you."
-    response = engine.gen_from_prompt(prompt)[0]
-    logger.critical(f"test_engine: {response}")
+    results = engine.gen_from_prompt(prompt, n_choices=4)
+    for i in range(4):
+        print(results[i])
 
 def mcts_demo():
     generator = TestGenerator()

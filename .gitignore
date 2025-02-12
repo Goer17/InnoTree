@@ -166,3 +166,7 @@ cython_debug/
 
 # Draw.io
 *.drawio
+
+# Project
+chroma/
+dataset/

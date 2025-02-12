@@ -28,7 +28,7 @@ class PromatParser:
     @staticmethod
     def to_context(string: str) -> Context | None:
         match_key = re.match(pattern=r"\[(.*?)\]", string=string)
-        match_content = re.match(pattern=r"\[.*?\](.*)", string=string, flags=re.DOTALL)
+        match_content = re.match(pattern=r"\[.*?\](.*)\[END\]", string=string, flags=re.DOTALL)
         if not match_key or not match_content:
             # Error format
             return None
@@ -95,7 +95,7 @@ class LLMEngine:
             *args, **kwargs
         )
         results = []
-        for i in range(n_choices):
+        for i in range(len(responses.choices)):
             response = responses.choices[i].message.content
             results.append(response)
         return results
@@ -128,7 +128,7 @@ class LLMEngine:
             *args, **kwargs
         )
         results = []
-        for i in range(n_choices):
+        for i in range(len(responses.choices)):
             response = responses.choices[i].message.content
             results.append(response)
         return results
@@ -137,6 +137,7 @@ class LLMEngine:
                           contexts: List[Context],
                           sys_prompt: str | PromptTemplate = "You are an AI assistant.",
                           n_choices: int = 1,
+                          legal_actions: List[str] = ["reasoning", "search", "gen_idea"],
                           *args, **kwargs
                           ) -> List[Context]:
         sys_prompt = sys_prompt if isinstance(sys_prompt, str) else sys_prompt.value
@@ -165,13 +166,14 @@ class LLMEngine:
             model=self.model,
             messages=messages,
             n=n_choices,
-            *args, **kwargs
+            *args, **kwargs,
+            stop=["[END]"]
         )
         results = []
-        for i in range(n_choices):
-            result = responses.choices[i].message.content
+        for i in range(len(responses.choices)):
+            result = responses.choices[i].message.content + "[END]"
             context = PromatParser.to_context(result)
-            if context is not None:
+            if context is not None and context.key in legal_actions:
                 results.append(context)
         if len(results) == n_choices:
             return results
