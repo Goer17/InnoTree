@@ -1,37 +1,21 @@
-from typing import (
-    List
-)
-from abc import ABC, abstractmethod
-from .general import (
-    LLMEngine
-)
-from mcts.node import (
-    Context
-)
-from rag.general import(
-    TestRAG
-)
+from agents.engine import LLMEngine
+from mcts.node import Context
+from utils.rag import RAG
+from typing import List
+import asyncio
 
-class Feedbacker(ABC):
-    def __init__(self):
-        super().__init__()
-    
-    @abstractmethod
-    def feedback(self,
-                 contexts: List[Context],
-                 *args, **kwargs
-                 ) -> str:
-        pass
+class Feedbacker:
+    def __init__(
+        self,
+        engine: LLMEngine,
+        rag: RAG,
+        n_results: int = 3
+    ):
+        self.engine = engine
+        self.rag = rag
+        self.n_results = n_results
 
-class SimpleFeedbacker(Feedbacker):
-    def __init__(self,
-                 engine: LLMEngine
-                 ):
-        super().__init__()
-        self.rag = TestRAG(engine)
-    
-    def feedback(self, contexts, *args, **kwargs) -> str:
-        assert len(contexts) > 0 and contexts[-1].key == "search"
-        response = self.rag.run(query=contexts[-1].content)
-        
-        return response
+    def feedback(self, context: Context) -> str:
+        if context.key == "search":
+            return self.rag.query(context.content, self.n_results)
+        return None

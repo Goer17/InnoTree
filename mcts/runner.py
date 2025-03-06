@@ -1,142 +1,175 @@
-import random
-from typing import (
-    Dict, List, Literal,
-    Callable
-)
-from .node import Context, Node
-from agents.generator import (
-    Generator
-)
-from agents.feedbacker import (
-    Feedbacker
-)
-from agents.rewarder import (
-    Rewarder,
-    IdeaArena
-)
-from utils.log import (
-    logger
-)
+from typing import Dict, List, Any, Callable
+
+from agents.generator import Generator
+from agents.rewarder import Rewarder, ScienceRewarder, IdeaArenaRewarder
+from agents.feedbacker import Feedbacker
+from mcts.node import Node, Context
+from typing import Literal
+
+from utils.logger import logger
+from shortuuid import uuid
+
 class MCTSRunner:
     def __init__(self,
+                 topic: str,
                  generator: Generator,
                  rewarder: Rewarder,
+                 feedbacker: Feedbacker,
                  root: Node = Node.root_node(),
                  sampling_method: Literal["best", "epsilon", "v-epsilon"] = "best",
-                 exploration_wright: float = 1.0,
+                 exploration_weight: float = 1.0,
                  *args, **kwargs
                  ):
-        self.root = root
+        self.topic = topic
         self.generator = generator
         self.rewarder = rewarder
+        self.feedbacker = feedbacker
+        self.root = root
         self.sampling_method = sampling_method
-        self.exploration_wright = exploration_wright
-        self.best_rollout = None
+        self.exploration_weight = exploration_weight
         self.pre_contexts = []
-        self.rollout_history = []
-        if self.sampling_method in ["epsilon", "v-epsilon"]:
-            self.epsilon = kwargs.get("epsilon", 0.2)
+        self.history: List[str] = []
+        self.idea_db: List[str] = []
+
+    def to_json(self) -> List[Dict[str, Any]]:
+        datas = []
+        def _traverse(node: Node) -> List[Dict[str, Any]]:
+            data = {
+                "n_id": node.n_id,
+                "p_id": node.parent.n_id if node.parent else "",
+                "n_key": node.context.key,
+                "content": node.context.content,
+                "observation": node.context.observation if node.context.observation else "",
+                "value": node.value,
+                "visits": node.visits
+            }
+            datas.append(data)
+            for child in node.children:
+                _traverse(child)
+        _traverse(self.root)
+        return datas
     
-    def __expand(self,
-                 current_node: Node,
-                 contexts: List[Context],
-                 n_exp: int
-                 ):
+    def __expand(
+        self,
+        current: Node,
+        contexts: List[Context],
+        n_expand: int = 5
+    ):
         exp_contexts = self.generator.generate(
             contexts=contexts,
-            n_choices=n_exp
+            n=n_expand
         )
-        msg = "expanded nodes :\n"
-        for exp_context in exp_contexts:
-            msg += (str(exp_context) + "\n\n")
-        logger.debug(msg=msg)
-        for i in range(n_exp):
+        logger.info(f"Expanded {len(exp_contexts)} nodes !")
+        for i in range(len(exp_contexts)):
             child_context = exp_contexts[i]
+            logger.info(f"{i} - child:\n{child_context}")
             child_node = Node(
                 context=child_context,
-                parent=current_node,
-                depth=current_node.depth + 1
+                parent=current,
+                depth=current.depth + 1
             )
-            current_node.children.append(child_node)
+            current.children.append(child_node)
     
-    def __backprop(self,
-                   leaf_node: Node,
-                   reward: float
-                   ):
+    def __backprop(
+        self,
+        leaf_node: Node,
+        reward: float
+    ):
         node = leaf_node
-        logger.debug(msg="backpropagation starting...")
         while node:
             node.update(reward=reward)
             node = node.parent
-        logger.debug(msg="backpropagation was over.")
     
-    def __rollout(self,
-                  contexts: List[Context],
-                  terminal_func: Callable
-                  ) -> List[Context]:
+    def __rollout(
+            self,
+            contexts: List[Context],
+            terminal_func: Callable
+        ) -> List[Context]:
         rollout = contexts[:]
-        logger.debug(msg="rollout starting...")
         while not terminal_func(rollout):
-            logger.debug(msg="generating next step...")
             gen_context = self.generator.generate(contexts=rollout)[0]
-            logger.debug(msg=f"next step : {gen_context}")
+            gen_context.observation = self.feedbacker.feedback(context=gen_context)
             rollout.append(gen_context)
-        self.rollout_history.append(rollout[:])
+            logger.info(f"[rollout...] next step: {gen_context}")
+        if len(rollout) and rollout[-1].key == "idea":
+            self.idea_db.append(rollout[-1].content)
+            self.history.append(rollout[-1].content)
         return rollout
     
-    def __run_one_trial(self,
-            trial_id: int,
-            n_rollouts: int,
-            n_exp: int,
-            terminal_func: Callable,
-            *args, **kwargs
-            ):
-        cnt_rollouts = 0
-        if isinstance(self.rewarder, IdeaArena):
-            logger.critical("Initializing the idea DB...")
-            self.rewarder.clear_all()
-            init_idea_cnt = kwargs.get("init_idea_cnt", 4)
-            for i in range(init_idea_cnt):
-                idea = self.__rollout(contexts=self.pre_contexts[:], terminal_func=terminal_func)[-1].content
-                self.rewarder.add_idea(idea)
-            logger.critical(f"{init_idea_cnt} initial ideas were generated.")
-        while cnt_rollouts < n_rollouts:
-            current_node = self.root
+    def __run_one_trial(
+        self,
+        trial_id: int,
+        n_rollouts: int,
+        n_expand: int,
+        terminal_func: Callable,
+        *args, **kwargs
+    ):
+        logger.critical(f"Started trial [id = {trial_id}]")
+        logger.info(f"Running trial {trial_id}...")
+        self.idea_db = []
+        if isinstance(self.rewarder, IdeaArenaRewarder):
+            base_cnt = kwargs.get("base_cnt", 4)
+            yield self.to_json() + [{
+                "n_id": f"temp#{uuid()[:8]}",
+                "p_id": self.root.n_id,
+                "n_key": "initialize...",
+                "content": f"generated {base_cnt} initial ideas..."
+            }]
+            for _ in range(base_cnt):
+                rollout = self.__rollout(
+                    contexts=self.pre_contexts,
+                    terminal_func=terminal_func
+                )
+                if rollout[-1].key == "idea":
+                    self.idea_db.append(rollout[-1].content)
+        yield self.to_json()
+        for _ in range(n_rollouts):
+            current = self.root
             contexts = self.pre_contexts[:]
-            while not current_node.is_leaf():
+            while not current.is_leaf():
                 if self.sampling_method == "best":
-                    current_node = current_node.best_child(exploration_weight=self.exploration_wright) # select
+                    current = current.best_child(exploration_weight=self.exploration_weight)
                 elif self.sampling_method == "epsilon":
-                    current_node = current_node.epsilon_sample(epsilon=self.epsilon, explaration_weight=self.exploration_wright)
+                    current = current.epsilon_sample(epsilon=self.epsilon, explaration_weight=self.exploration_weight)
                 elif self.sampling_method == "v-epsilon":
-                    current_node = current_node.epsilon_sample(epsilon=self.epsilon / self.root.visits, explaration_weight=self.exploration_wright)
-                if current_node != self.root:
-                    contexts.append(current_node.context)
+                    current = current.epsilon_sample(epsilon=self.epsilon / self.root.visits, explaration_weight=self.exploration_weight)
+                if current != self.root:
+                    contexts.append(current.context)
             if terminal_func(contexts):
                 if self.sampling_method == "best":
                     return
-                cnt_rollouts += 1
-                logger.critical(f"trial {trial_id}: rollout {cnt_rollouts} was over, current best value : {self.best_rollout['reward']}")
                 continue
-            if current_node.visits > 0 or current_node == self.root:
-                self.__expand(current_node=current_node, contexts=contexts, n_exp=n_exp) # expand
-                current_node = random.choice(current_node.children)
-            rollout = self.__rollout(contexts=contexts, terminal_func=terminal_func) # rollout
-            reward, judgment = self.rewarder.get_reward(rollout)
-            logger.debug(msg=f"reward = {reward}")
-            if judgment:
-                logger.debug(msg=f"specific judgment:\n{judgment}")
-            if isinstance(self.rewarder, IdeaArena):
-                self.rewarder.add_idea(rollout[-1].content)
-            if self.best_rollout is None or self.best_rollout["reward"] < reward:
-                self.best_rollout = {
-                    "rollout": rollout,
-                    "reward": reward
-                }
-            self.__backprop(leaf_node=current_node, reward=reward) # back propagation
-            cnt_rollouts += 1
-            logger.critical(f"trial {trial_id}: rollout {cnt_rollouts} was over, current best value : {self.best_rollout['reward']}")
-            
+            if current.visits > 0:
+                self.__expand(
+                    current=current, 
+                    contexts=contexts,
+                    n_expand=n_expand
+                )
+                yield self.to_json()
+                for child in current.children:
+                    child.context.observation = self.feedbacker.feedback(context=child.context)
+                yield self.to_json()
+                current = current.children[0]
+                contexts.append(current.context)
+            yield self.to_json() + [{
+                "n_id": f"temp#{uuid()[:8]}",
+                "p_id": current.n_id,
+                "n_key": "rollout...",
+                "content": ""
+            }]
+            rollout = self.__rollout(
+                contexts=contexts,
+                terminal_func=terminal_func
+            )
+            reward, judges = self.rewarder.reward(self.topic, idea=rollout[-1].content, idea_db=self.idea_db)
+            if isinstance(judges, list):
+                for judge in judges:
+                    logger.info(f"Rewarder response:\n{judge}")
+            self.__backprop(
+                leaf_node=current,
+                reward=reward
+            )
+            yield self.to_json()
     
     def __next_step(self) -> bool:
         msg = "children nodes :\n"
@@ -154,24 +187,23 @@ class MCTSRunner:
         self.root.clear()
         return True
     
-    def run(self,
-            n_trials: int = -1,
-            n_rollouts: int = 10,
-            n_exp: int = 5,
-            terminal_func: Callable = lambda contexts: contexts[-1].key == "terminate"
-            ):
-        cnt_trials = 0
-        while n_trials < 0 or cnt_trials < n_trials:
-            self.__run_one_trial(
-                trial_id=cnt_trials,
+    def run(
+        self,
+        n_trials: int,
+        n_rollouts: int,
+        n_expand: int,
+        terminal_func: Callable,
+        *args, **kwargs
+    ):
+        for trial_id in range(n_trials):
+            yield from self.__run_one_trial(
+                trial_id=trial_id,
                 n_rollouts=n_rollouts,
-                n_exp=n_exp,
+                n_expand=n_expand,
                 terminal_func=terminal_func
             )
             if not self.__next_step():
                 # terminal node
-                logger.critical(f"all trials were over, best value = {self.best_rollout['reward']}")
+                logger.critical(f"all trials were over.")
                 break
-            logger.critical(f"trial {cnt_trials} was over, next step:\n{self.root.context}")
-            cnt_trials += 1
-        
+            logger.critical(f"trial {trial_id} was over, next step:\n{self.root.context}")

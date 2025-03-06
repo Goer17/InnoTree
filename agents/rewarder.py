@@ -1,184 +1,95 @@
+from abc import ABC, abstractmethod
+from typing import List
+from utils.string import Parser
+from .engine import LLMEngine
+from utils.logger import logger
+import yaml
+from pathlib import Path
 import asyncio
 import random
-import re
-import yaml
-import json
-from pathlib import Path
-from abc import ABC, abstractmethod
-from typing import (
-    List,
-    Dict,
-    Tuple
-)
-from mcts.node import (
-    Context
-)
-from agents.general import (
-    LLMEngine,
-    PromptTemplate
-)
 
 class Rewarder(ABC):
-    def __init__(self):
-        super().__init__()
-
     @abstractmethod
-    def get_reward(self, contexts: List[Context], *args, **kwargs) -> Tuple[float, Dict | None]:
+    def reward(self, topic: str, idea: str, *args, **kwargs):
         pass
 
-class IdeaArena(Rewarder):
-    def __init__(self,
-                 engine: LLMEngine,
-                 topic: str
-                 ):
-        config_path = Path("agents") / "prompts" / "idea-arena.yml"
-        with open(config_path) as f:
-            prompts = yaml.safe_load(f)
-            sys_prompt = PromptTemplate(
-                template=prompts["sys_prompt"],
-                parameters={
-                    "topic": topic,
-                    "idea_A": "",
-                    "idea_B": ""
-                }
-            )
-            self.sys_prompt = sys_prompt
+class ScienceRewarder(Rewarder):
+    def __init__(self, engine: LLMEngine):
         self.engine = engine
-        self.idea_db = []
-    
-    async def combat(self,
-               idea1: str,
-               idea2: str,
-               alpha: float = 1.0
-               ) -> bool:
-        idea_idx = random.randint(0, 1)
-        if idea_idx == 0:
-            self.sys_prompt.parameters["idea_A"] = idea1
-            self.sys_prompt.parameters["idea_B"] = idea2
-        else:
-            self.sys_prompt.parameters["idea_A"] = idea2
-            self.sys_prompt.parameters["idea_B"] = idea1
-        try:
-            response = (await self.engine.async_gen_from_prompt(sys_prompt=self.sys_prompt))[0]
-            response = re.search(pattern=r"```json(.*?)```", string=response, flags=re.S).group(1)
-            response = json.loads(response)
-            s_a, s_b = 0, 0
-            for key in [
-                "novelty",
-                "feasibility",
-                "clarity",
-                "impact",
-                "relevance"
-            ]:
-                s_a += response[key]["scores"]["A"] + alpha * (response[key]["better"] == "A")
-                s_b += response[key]["scores"]["B"] + alpha * (response[key]["better"] == "B")
-            if idea_idx == 0 and s_a > s_b or idea_idx == 1 and s_a < s_b:
-                return True
-            else:
-                return False
-        except Exception as e:
-            # Retry
-            return await self.combat(
-                idea1=idea1,
-                idea2=idea2,
-                alpha=alpha
-            )
-    
-    def get_reward(self, contexts, *args, **kwargs) -> Tuple[float, Dict | None]:
-        idea = contexts[-1].content
-        win_cnt = 0
-        coro_list = []
-        for other_idea in self.idea_db:
-            coro = self.combat(idea, other_idea)
-            coro_list.append(coro)
-        responses, _ = asyncio.run(asyncio.wait(coro_list, timeout=None))
-        for response in responses:
-            if response.result():
-                win_cnt += 1
-
-        return win_cnt / (len(self.idea_db) + 1) * 10, None
-
-    def add_idea(self, idea: str):
-        self.idea_db.append(idea)
-    
-    def clear_all(self):
-        self.idea_db = []
-
-class SciRewarder(Rewarder):
-    def __init__(self,
-                 base_url: str,
-                 api_key: str,
-                 model: str,
-                 topic: str
-                 ):
-        config_path = Path("agents") / "prompts" / "sci-rewarder.yml"
+        config_path = Path("config") / "prompts" / "rewarder.yml"
         with open(config_path) as f:
             prompts = yaml.safe_load(f)
-            sys_prompt = PromptTemplate(
-                template=prompts["sys_prompt"],
-                parameters={
-                    "topic": topic,
-                    "idea": ""
-                }
-            )
-        self.engine = LLMEngine(
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            sys_prompt=sys_prompt
-        )
-    
-    def get_reward(self,
-                   contexts: List[Context],
-                   *args, **kwargs) -> Tuple[float, Dict | None]:
-        idea = contexts[-1].content
-        self.engine.sys_prompt.parameters["idea"] = idea
-        response = self.engine.gen_from_prompt()[0]
-        jud_match = re.match(pattern=r"```json(.*?)```", string=response, flags=re.DOTALL)
-        if not jud_match:
-            # TODO
-            # current: redo
-            # print("format error")
-            return self.get_reward(
-                contexts=contexts
-                *args, **kwargs
-            )
-        judgments = json.loads(jud_match.group(1))
-        score_sum = 0
-        for key in [
-            "novelty",
-            "feasibility",
-            "clarity",
-            "impact",
-            "relevance"
-        ]:
-            # TODO handle the key error
-            # current: redo
-            # print("format error")
-            if key not in judgments:
-                return self.get_reward(
-                    contexts=contexts,
-                    *args, **kwargs
-                )
-            score_sum += int(judgments[key]["score"])
-        score_avg = score_sum / 5
-        return score_avg, judgments
-            
+            self.sys_prompt = prompts["system"]
 
-class TestRewarder(Rewarder):
-    def __init__(self):
-        super().__init__()
-        self.path = [0, -1, -2, 1, -1, -1, 1, 2, 3, 5, -5, -10, 3, 3, 3, 3, -2, -2, 0]
-        # Maximum: 24
-        # +3, +3, +1, +1, +1, +3, +1, +1, +1, +3
+    def reward(self, topic: str, idea: str) -> float:
+        self.sys_prompt = self.sys_prompt.replace("$topic", topic)
+        self.sys_prompt = self.sys_prompt.replace("$idea", idea)
+        try:
+            response = self.engine.generate_text(
+                system_prompt=self.sys_prompt,
+                messages=[]
+            )[0]
+            response = Parser.parse_json(response)
+            score = 0
+            for _, content in response.items():
+                score += content["score"]
+
+            return score / len(response), None
+        except Exception as e:
+            logger.error(f"Error rewarding idea: {e}")
+            
+            return 0, None
+
+class IdeaArenaRewarder(Rewarder):
+    def __init__(self, engine: LLMEngine):
+        self.engine = engine
+        config_path = Path("config") / "prompts" / "idea-arena.yml"
+        with open(config_path) as f:
+            prompts = yaml.safe_load(f)
+            self.sys_prompt = prompts["system"]
     
-    def get_reward(self, contexts, *args, **kwargs) -> Tuple[float, Dict | None]:
-        reward = 0.0
-        idx = 0
-        for context in contexts:
-            idx += int(context.content)
-            if idx >= len(self.path):
-                break
-            reward += self.path[idx]
-        return reward, None
+    def reward(self, topic: str, idea: str, idea_db: List[str]) -> float:
+        sys_prompt = self.sys_prompt.replace("$topic", topic)
+        judges = []
+        async def _reward(idea_x: str, idea_y: str) -> bool:
+            tag_x, tag_y = "A", "B"
+            if random.random() < 0.5:
+                tag_x, tag_y = tag_y, tag_x
+            _sys_prompt = sys_prompt.replace(f"$idea_{tag_x}", idea_x)
+            _sys_prompt = sys_prompt.replace(f"$idea_{tag_y}", idea_y)
+            try:
+                response = (await self.engine.generate_text_async(
+                    system_prompt=_sys_prompt,
+                    messages=[]
+                ))[0]
+                response = Parser.parse_json(response)
+                score_x, score_y = 0, 0
+                res = ""
+                for key, content in response.items():
+                    score_x += content["scores"][tag_x] + (content["better"] == tag_x)
+                    score_y += content["scores"][tag_y] + (content["better"] == tag_y)
+                    res += (
+                        f"{key}:\n"
+                        f"{content['comparison']}\n"
+                        f"score: {tag_x}: {content['scores'][tag_x]} vs. {tag_y}: {content['scores'][tag_y]}\n"
+                    )
+                judges.append(
+                    f"Idea {tag_x}:\n{idea_x}\n"
+                    f"Idea {tag_y}:\n{idea_y}\n"
+                    f"Result:\n{res}\n\n"
+                )
+                return score_x > score_y
+            except Exception as e:
+                logger.error(f"Error rewarding idea: {e}")
+                return False
+
+        total = len(idea_db)
+        if total == 0:
+            return 0.0, None
+            
+        coro_list = [_reward(idea, other_idea) for other_idea in idea_db]
+        done, pedding = asyncio.run(asyncio.wait(coro_list))
+        wins = sum(task.result() for task in done)
+                
+        return 10 * (wins / total), judges
         

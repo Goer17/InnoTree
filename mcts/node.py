@@ -4,10 +4,12 @@ from typing import (
     Literal
 )
 import random
+import datetime
+from shortuuid import uuid
 
 class Context:
     def __init__(self,
-                 key: Literal["root", "reasoning", "search", "gen_idea", "refine_idea", "terminate"],
+                 key: Literal["root", "reasoning", "search", "idea", "refine", "terminate"],
                  content: str = "",
                  observation: str | None = None
                  ):
@@ -29,20 +31,20 @@ class Context:
             string += (
                 "[observation]\n"
                 f"{self.observation}\n"
+                "[END]"
             )
         return string
 
 class Node:
-    def __init__(self, context: Context, parent: 'Node' = None, depth: int = 0):
-        self.parent = parent
-        self.children = []
-        self.value = 0
-        self.visits = 0
-        self.context = context
-        self.depth = depth
-        self.reflection = ""
-        self.test_feedback = ""
-
+    def __init__(self, context: Context, parent: 'Node' = None, depth: int = 0, short_live: bool = False):
+        self.parent: Node | None = parent
+        self.children: List['Node'] = []
+        self.value: float = 0
+        self.visits: int = 0
+        self.context: Context = context
+        self.depth: int = depth
+        self.n_id: str = f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]-[#{uuid()[:8]}]"
+        self.short_live: bool = short_live
     def uct(self, exploration_weight: float = 1.0):
         if self.visits == 0:
             return float('inf')

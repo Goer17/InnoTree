@@ -169,4 +169,4 @@ cython_debug/
 
 # Project
 chroma/
-dataset/
+datasets/

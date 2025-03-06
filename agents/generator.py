@@ -3,66 +3,49 @@ import yaml
 from typing import (
     List
 )
-from abc import ABC, abstractmethod
 from mcts.node import (
     Context
 )
-from .general import LLMEngine
-from .feedbacker import (
-    SimpleFeedbacker
-)
+from .engine import LLMEngine
+from utils.string import Parser
+from utils.logger import logger
 
-class Generator(ABC):
-    def __init__(self):
-        super().__init__()
-        
-    @abstractmethod
-    def generate(self, contexts: List[Context], n_choices: int = 1, *args, **kwargs) -> List[Context]:
-        pass
 
-class SciGenerator(Generator):
+import yaml
+
+class Generator:
     def __init__(self,
                  engine: LLMEngine,
                  topic: str
                  ):
         super().__init__()
-        config_path = Path("agents") / "prompts" / "sci-generator.yml"
+        self.engine = engine
+        self.topic = topic
+        config_path = Path("config") / "prompts" / "generator.yml"
         with open(config_path) as f:
             prompts = yaml.safe_load(f)
-            sys_prompt = prompts["sys_prompt"]
-            sys_prompt=f"{sys_prompt}\n\nYour research topic is: {topic}"
-        self.engine = engine
-        self.sys_prompt = sys_prompt
-        self.feedbacker = SimpleFeedbacker(engine=engine)
+            self.sys_prompt = prompts["system"]
+            self.sys_prompt = self.sys_prompt.replace("$topic", self.topic)
 
-    def generate(self, contexts, n_choices: int = 1, *args, **kwargs) -> List[Context]:
-        ctx_choices = self.engine.gen_from_contexts(
-            contexts=contexts,
-            sys_prompt=self.sys_prompt,
-            n_choices=n_choices,
-            *args,
-            **kwargs
-        )
-        for ctx in ctx_choices:
-            if ctx.key == "search":
-                observation = self.feedbacker.feedback(
-                    contexts=contexts + [ctx]
-                )
-                ctx.observation = observation
-        return ctx_choices
 
-class TestGenerator(Generator):
-    def __init__(self):
-        super().__init__()
-        self.seed = 0
-    
-    def generate(self, contexts, n_choices: int = 1, *args, **kwargs) -> List[Context]:
-        ctx_choices = []
-        for i in range(n_choices):
-            context = Context(
-                key='reasoning',
-                content=f"{self.seed % 3 + 1}"
+    def generate(self, contexts: List[Context], *args, **kwargs) -> List[Context]:
+        msgs = Parser.ctx2msg(contexts)
+        ctxs = []
+        try:
+            responses = self.engine.generate_text(
+                system_prompt=self.sys_prompt,
+                messages=msgs,
+                stop=["[END]"],
+                *args,
+                **kwargs
             )
-            ctx_choices.append(context)
-            self.seed += 1
-        return ctx_choices
+            for response in responses:
+                ctx = Parser.msg2ctx(response + "[END]")
+                if ctx is None:
+                    raise RuntimeError("Format mistake")
+                ctxs.append(ctx)
+            return ctxs
+        except Exception as e:
+            logger.error(f"Error generating idea: {e}")
+            # retry...
+            return self.generate(contexts)
