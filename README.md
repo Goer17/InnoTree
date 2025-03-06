@@ -16,8 +16,6 @@
 git clone https://github.com/Goer17/InnoTree.git
 ```
 
-
-
 **Downloading the dependencies**
 
 ```bash
@@ -29,8 +27,6 @@ conda activate inno_tree
 pip install -r requirements.txt
 ```
 
-
-
 **Running**
 
 ```bash
@@ -41,11 +37,9 @@ python run.py --topic "Generate one scientific research idea based on multi-agen
     --sampling_method "best"
 ```
 
-
-
 #### Todo List
 
-- [ ] Implementing RAG interface
+- [X] Implementing RAG interface
 - [ ] More Action Node
 - [ ] Benchmarking
-- [ ] MCTS Visualization
+- [X] MCTS Visualization
