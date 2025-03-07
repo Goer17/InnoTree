@@ -1,3 +1,5 @@
+from typing import List
+
 from chromadb import PersistentClient
 from abc import ABC, abstractmethod
 
@@ -13,8 +15,7 @@ class VanillaRAG(RAG):
         self.collection = client.get_or_create_collection("rag")
 
     def add(self, ids: list[str], documents: list[str], metadatas: list[dict] = None):
-        self.collection.add(ids=ids, documents=documents, metadatas=metadatas)
-    
+        self.collection.add(ids=ids, documents=documents, metadatas=metadatas) 
 
     def query(self, q: str, n_results: int = 1) -> str:
         results = self.collection.query(query_texts=[q], n_results=n_results)
@@ -28,3 +29,6 @@ class VanillaRAG(RAG):
             response += f"Abstract:\n{results['documents'][0][i]}\n"
             response += "=" * 100 + "\n"
         return response
+    
+    def get(self, ids: list[str]):
+        return self.collection.get(ids=ids)

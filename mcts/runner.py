@@ -161,6 +161,8 @@ class MCTSRunner:
                 contexts=contexts,
                 terminal_func=terminal_func
             )
+            if len(rollout) == 0 or rollout[-1].key != "idea":
+                continue
             reward, judges = self.rewarder.reward(self.topic, idea=rollout[-1].content, idea_db=self.idea_db)
             if isinstance(judges, list):
                 for judge in judges:

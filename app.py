@@ -72,7 +72,7 @@ def stream():
             n_trials=params["n_trials"],
             n_rollouts=params["n_rollouts"],
             n_expand=params["n_expand"],
-            terminal_func=lambda ctxs: len(ctxs) > 0 and ctxs[-1].key == "idea"
+            terminal_func=lambda ctxs: (len(ctxs) > 0 and ctxs[-1].key == "idea") or len(ctxs) >= 20
         ):
             data_tree = json.dumps(tree)
             logger.critical(f"[task-id: {task_id}] updated!")

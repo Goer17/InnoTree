@@ -1,29 +1,42 @@
 <script setup lang="ts">
-import { watch, reactive, ref, type PropType, nextTick } from 'vue';
+import { watch, ref, onMounted, onUnmounted, provide, nextTick, type PropType } from 'vue';
 import Node from './Node.vue';
 
 type NodeType = {
-    p_id: string,
-    n_id: string,
-    n_key: string,
-    content: string,
-    observation?: string,
-    value?: number,
-    visits?: number,
+  p_id: string;
+  n_id: string;
+  n_key: string;
+  content: string;
+  observation?: string;
+  value?: number;
+  visits?: number;
 };
 
+interface NodePosition {
+  getCDotPosition: () => DOMRect;
+  getFDotPosition: () => DOMRect;
+}
+
 const props = defineProps({
-    tree: {
-        type: Array as PropType<NodeType[]>,
-        required: true
-    }
+  tree: {
+    type: Array as PropType<NodeType[]>,
+    required: true
+  }
 });
 
-const positions = reactive<Record<string, [number, number, number, number]>>({});
+const nodesMap = ref(new Map<string, NodePosition>());
+const svgCanvas = ref<SVGSVGElement | null>(null);
+const arrows = ref<SVGLineElement[]>([]);
 
-const add_pos = (n_id: string, x1: number, x2: number, x3: number, x4: number) => {
-    positions[n_id] = [x1, x2, x3, x4];
-}
+
+provide('nodeContext', {
+  registerNode: (key: string, position: NodePosition) => {
+    nodesMap.value.set(key, position);
+  },
+  unregisterNode: (key: string) => {
+    nodesMap.value.delete(key);
+  }
+});
 
 const flatten_tree = (tree: NodeType[]) => {
     const treeDict: Record<string, NodeType> = {};
@@ -52,77 +65,121 @@ const flatten_tree = (tree: NodeType[]) => {
 
 const nodes = ref<NodeType[][]>(flatten_tree(props.tree));
 
-watch(() => props.tree, (newTree) => {
-    console.log(newTree);
-    nodes.value = flatten_tree(newTree);
-}, { deep: true });
-
-const svgCanvas = ref<SVGSVGElement | null>(null);
-
-const drawArrow = (x1: number, y1: number, x2: number, y2: number): void => {
+// 箭头绘制逻辑
+const createArrowMarker = () => {
+  if (!svgCanvas.value) return;
+  
   const svgNS = "http://www.w3.org/2000/svg";
-
-  if (!svgCanvas.value) return; // 确保 SVG 画布已存在
-
   let defs = svgCanvas.value.querySelector("defs");
   if (!defs) {
     defs = document.createElementNS(svgNS, "defs");
     svgCanvas.value.appendChild(defs);
   }
 
-  let marker = document.getElementById("arrowMarker") as SVGMarkerElement | null;
-  if (!marker) {
-    marker = document.createElementNS(svgNS, "marker") as SVGMarkerElement;
+  if (!document.getElementById("arrowMarker")) {
+    const marker = document.createElementNS(svgNS, "marker");
     marker.setAttribute("id", "arrowMarker");
-    marker.setAttribute("markerWidth", "10");
-    marker.setAttribute("markerHeight", "7");
-    marker.setAttribute("refX", "10");
-    marker.setAttribute("refY", "3.5");
+    // 缩小箭头尺寸
+    marker.setAttribute("markerWidth", "8");
+    marker.setAttribute("markerHeight", "5");
+    marker.setAttribute("refX", "7.5");  // 调整箭头位置
+    marker.setAttribute("refY", "2.5");
     marker.setAttribute("orient", "auto");
 
-    const arrow = document.createElementNS(svgNS, "polygon") as SVGPolygonElement;
-    arrow.setAttribute("points", "0 0, 10 3.5, 0 7");
-    arrow.setAttribute("fill", "black");
-
-    marker.appendChild(arrow);
+    // 更精致的三角形路径
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", "M0,0 L7.5,2.5 L0,5"); // 更紧凑的箭头形状
+    path.setAttribute("fill", "#4a5568"); // 使用深灰色
+    marker.appendChild(path);
     defs.appendChild(marker);
   }
+};
 
-  const line = document.createElementNS(svgNS, "line") as SVGLineElement;
-  line.setAttribute("x1", x1.toString());
-  line.setAttribute("y1", y1.toString());
-  line.setAttribute("x2", x2.toString());
-  line.setAttribute("y2", y2.toString());
-  line.setAttribute("stroke", "black");
-  line.setAttribute("stroke-width", "2");
-  line.setAttribute("marker-end", "url(#arrowMarker)");
+const drawConnection = (parentId: string, childId: string) => {
+  if (!svgCanvas.value) return;
 
+  const parent = nodesMap.value.get(parentId);
+  const child = nodesMap.value.get(childId);
+  if (!parent || !child) return;
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const line = document.createElementNS(svgNS, "line");
+  
+  const updatePosition = () => {
+    const start = parent.getFDotPosition();
+    const end = child.getCDotPosition();
+    
+    line.setAttribute('x1', (start.left + start.width/2 + window.scrollX).toString());
+    line.setAttribute('y1', (start.top + start.height/2 + window.scrollY).toString());
+    line.setAttribute('x2', (end.left + end.width/2 + window.scrollX).toString());
+    line.setAttribute('y2', (end.top + end.height/2 + window.scrollY).toString());
+  };
+
+  line.setAttribute('stroke', '#4a5568'); // 深灰色
+  line.setAttribute('stroke-width', '1.5');
+  line.setAttribute('stroke-linecap', 'round'); // 圆角端点
+  line.setAttribute('marker-end', 'url(#arrowMarker)');
+  line.dataset.parent = parentId;
+  line.dataset.child = childId;
+  
   svgCanvas.value.appendChild(line);
+  arrows.value.push(line);
+  updatePosition();
 };
 
-watch(positions, async () => {
-    await nextTick(); // 确保 positions 全部更新
-    drawAllArrows();
-}, { deep: true });
+const updateAllArrows = () => {
+  arrows.value.forEach(line => {
+    const parentId = line.dataset.parent!;
+    const childId = line.dataset.child!;
+    const parent = nodesMap.value.get(parentId);
+    const child = nodesMap.value.get(childId);
 
-const drawAllArrows = () => {
-    if (!svgCanvas.value) return;
-    svgCanvas.value.innerHTML = '';
-    for (let node of props.tree) {
-        if (node.p_id) {
-            let [x2, y2, , ] = positions[node.n_id];
-            let [, , x1, y1] = positions[node.p_id];
-            drawArrow(x1, y1, x2, y2);
-        }
+    if (parent && child) {
+      const start = parent.getFDotPosition();
+      const end = child.getCDotPosition();
+      
+      line.setAttribute('x1', (start.left + start.width/2 + window.scrollX).toString());
+      line.setAttribute('y1', (start.top + start.height/2 + window.scrollY).toString());
+      line.setAttribute('x2', (end.left + end.width/2 + window.scrollX).toString());
+      line.setAttribute('y2', (end.top + end.height/2 + window.scrollY).toString());
     }
+  });
 };
+
+// 事件监听
+const observer = new ResizeObserver(updateAllArrows);
+onMounted(() => {
+  createArrowMarker();
+  window.addEventListener('scroll', updateAllArrows, true);
+  observer.observe(document.documentElement);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', updateAllArrows, true);
+  observer.disconnect();
+});
+
+watch(() => props.tree, (newTree) => {
+  nodes.value = flatten_tree(newTree);
+  
+  nextTick(() => {
+    arrows.value.forEach(line => line.remove());
+    arrows.value = [];
+    
+    newTree.forEach(node => {
+      if (node.p_id) {
+        drawConnection(node.p_id, node.n_id);
+      }
+    });
+  });
+}, { deep: true, immediate: true });
 
 </script>
 
 <template>
     <div id="tree-box">
         <div class="layer" v-for="layer in nodes">
-            <Node v-for="node in layer" :key="node.n_id" v-bind="node" @addEvent="add_pos" />
+            <Node v-for="node in layer" :key="node.n_id" v-bind="node" />
         </div>
         <svg ref="svgCanvas" class="svg-fixed" width="100%" height="100%"></svg>
     </div>
@@ -138,6 +195,7 @@ const drawAllArrows = () => {
   height: 100vh;
   pointer-events: none;
   z-index: 10;
+  overflow: visible; /* 允许内容溢出 */
 }
 
 .layer {
