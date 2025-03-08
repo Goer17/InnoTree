@@ -52,6 +52,8 @@ class IdeaArenaRewarder(Rewarder):
         sys_prompt = self.sys_prompt.replace("$topic", topic)
         judges = []
         async def _reward(idea_x: str, idea_y: str) -> bool:
+            if idea_x == idea_y:
+                return True
             tag_x, tag_y = "A", "B"
             if random.random() < 0.5:
                 tag_x, tag_y = tag_y, tag_x

@@ -1,4 +1,4 @@
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Tuple
 
 from agents.generator import Generator
 from agents.rewarder import Rewarder, ScienceRewarder, IdeaArenaRewarder
@@ -15,7 +15,6 @@ class MCTSRunner:
                  generator: Generator,
                  rewarder: Rewarder,
                  feedbacker: Feedbacker,
-                 root: Node = Node.root_node(),
                  sampling_method: Literal["best", "epsilon", "v-epsilon"] = "best",
                  exploration_weight: float = 1.0,
                  *args, **kwargs
@@ -24,10 +23,11 @@ class MCTSRunner:
         self.generator = generator
         self.rewarder = rewarder
         self.feedbacker = feedbacker
-        self.root = root
+        self.root: Node = Node.root_node()
         self.sampling_method = sampling_method
         self.exploration_weight = exploration_weight
         self.pre_contexts = []
+        self.pre_node_profiles = []
         self.history: List[str] = []
         self.idea_db: List[str] = []
 
@@ -36,7 +36,7 @@ class MCTSRunner:
         def _traverse(node: Node) -> List[Dict[str, Any]]:
             data = {
                 "n_id": node.n_id,
-                "p_id": node.parent.n_id if node.parent else "",
+                "p_id": node.parent.n_id if node.parent else (self.pre_node_profiles[-1]["n_id"] if len(self.pre_node_profiles) else ""),
                 "n_key": node.context.key,
                 "content": node.context.content,
                 "observation": node.context.observation if node.context.observation else "",
@@ -47,7 +47,7 @@ class MCTSRunner:
             for child in node.children:
                 _traverse(child)
         _traverse(self.root)
-        return datas
+        return self.pre_node_profiles + datas
     
     def __expand(
         self,
@@ -84,17 +84,29 @@ class MCTSRunner:
             self,
             contexts: List[Context],
             terminal_func: Callable
-        ) -> List[Context]:
+        ):
         rollout = contexts[:]
+        temp_path = []
+        yield False, [{"n_id": f"temp - [#{uuid()[:8]}]", "p_id": "", "n_key": "...", "content": ""}]
         while not terminal_func(rollout):
             gen_context = self.generator.generate(contexts=rollout)[0]
             gen_context.observation = self.feedbacker.feedback(context=gen_context)
             rollout.append(gen_context)
+            temp_path.append(
+                {
+                    "n_id": f"temp - [#{uuid()[:8]}]",
+                    "p_id": temp_path[-1]["n_id"] if len(temp_path) else "",
+                    "n_key": gen_context.key,
+                    "content": gen_context.content,
+                    "observation": gen_context.observation if gen_context.observation else ""
+                }
+            )
+            yield False, temp_path + [{"n_id": f"temp - [#{uuid()[:8]}]", "p_id": temp_path[-1]["n_id"], "n_key": "...", "content": ""}]
             logger.info(f"[rollout...] next step: {gen_context}")
         if len(rollout) and rollout[-1].key == "idea":
             self.idea_db.append(rollout[-1].content)
             self.history.append(rollout[-1].content)
-        return rollout
+        yield True, rollout
     
     def __run_one_trial(
         self,
@@ -109,19 +121,18 @@ class MCTSRunner:
         self.idea_db = []
         if isinstance(self.rewarder, IdeaArenaRewarder):
             base_cnt = kwargs.get("base_cnt", 4)
-            yield self.to_json() + [{
-                "n_id": f"temp#{uuid()[:8]}",
-                "p_id": self.root.n_id,
-                "n_key": "initialize...",
-                "content": f"generated {base_cnt} initial ideas..."
-            }]
             for _ in range(base_cnt):
-                rollout = self.__rollout(
+                for tag, res in self.__rollout(
                     contexts=self.pre_contexts,
                     terminal_func=terminal_func
-                )
-                if rollout[-1].key == "idea":
-                    self.idea_db.append(rollout[-1].content)
+                ):
+                    if not tag:
+                        res[0]["p_id"] = self.root.n_id
+                        yield self.to_json() + res
+                    else:
+                        rollout = res
+                        if rollout[-1].key == "idea":
+                            self.idea_db.append(rollout[-1].content)
         yield self.to_json()
         for _ in range(n_rollouts):
             current = self.root
@@ -151,16 +162,15 @@ class MCTSRunner:
                 yield self.to_json()
                 current = current.children[0]
                 contexts.append(current.context)
-            yield self.to_json() + [{
-                "n_id": f"temp#{uuid()[:8]}",
-                "p_id": current.n_id,
-                "n_key": "rollout...",
-                "content": ""
-            }]
-            rollout = self.__rollout(
+            for tag, res in self.__rollout(
                 contexts=contexts,
                 terminal_func=terminal_func
-            )
+            ):
+                if not tag:
+                    res[0]["p_id"] = current.n_id
+                    yield self.to_json() + res
+                else:
+                    rollout = res
             if len(rollout) == 0 or rollout[-1].key != "idea":
                 continue
             reward, judges = self.rewarder.reward(self.topic, idea=rollout[-1].content, idea_db=self.idea_db)
@@ -179,10 +189,22 @@ class MCTSRunner:
             msg += (
                 f"child-{idx}: [{child.context.key}]\n"
                 f"{child.context.content[:50]}...\n"
-                f"UCT = {child.uct()}\n\n"
+                f"AVG.value = {child.uct(exploration_weight=0)}\n\n"
             )
         logger.debug(msg=msg)
-        self.root = self.root.best_child()
+        self.pre_node_profiles.append(
+            {
+                "n_id": self.root.n_id,
+                "p_id": self.pre_node_profiles[-1]["n_id"] if len(self.pre_node_profiles) else "",
+                "n_key": self.root.context.key,
+                "content": self.root.context.content,
+                "observation": self.root.context.observation if self.root.context.observation else "",
+                "value": self.root.value,
+                "visits": self.root.visits,
+                "fixed": True
+            }
+        )
+        self.root = self.root.best_child(exploration_weight=0)
         if self.root is None:
             return False
         self.pre_contexts.append(self.root.context)
