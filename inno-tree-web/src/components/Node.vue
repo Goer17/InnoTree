@@ -152,13 +152,14 @@ const handleMouseMove = (e: MouseEvent) => {
 }
 
 .fdot {
+    visibility: hidden;
     position: absolute;
     width: 8px;
     height: 8px;
     background-color: #1565c0;
     border-radius: 50%;
 
-    bottom: -10px;
+    bottom: -5px;
     left: 50%;
     transform: translateX(-50%);
 }

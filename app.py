@@ -48,6 +48,8 @@ def stream():
         return jsonify({"error": "Task not found"}), 404
 
     params = tasks[task_id]
+    tasks.pop(task_id)
+    
     engine = LLMEngineFactory.create_engine(
         api_key=params["api_key"],
         base_url=params["base_url"],
@@ -78,7 +80,7 @@ def stream():
             logger.critical(f"[task-id: {task_id}] updated!")
             yield f"data: {data_tree}\n\n"
             time.sleep(0.5)
-        yield []
+        yield f"data: []\n\n"
 
     return Response(emit(), content_type="text/event-stream")
 

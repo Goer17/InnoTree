@@ -141,9 +141,9 @@ class MCTSRunner:
                 if self.sampling_method == "best":
                     current = current.best_child(exploration_weight=self.exploration_weight)
                 elif self.sampling_method == "epsilon":
-                    current = current.epsilon_sample(epsilon=self.epsilon, explaration_weight=self.exploration_weight)
+                    current = current.epsilon_sample(epsilon=0.1, explaration_weight=self.exploration_weight)
                 elif self.sampling_method == "v-epsilon":
-                    current = current.epsilon_sample(epsilon=self.epsilon / self.root.visits, explaration_weight=self.exploration_weight)
+                    current = current.epsilon_sample(epsilon=0.1 / self.root.visits, explaration_weight=self.exploration_weight)
                 if current != self.root:
                     contexts.append(current.context)
             if terminal_func(contexts):

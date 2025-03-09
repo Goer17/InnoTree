@@ -72,15 +72,19 @@ const start = () => {
             if (tree.length == 0) {
                 event_src.close();
                 enableButtons();
+                return;
             }
             emit("update", tree);
         }
         event_src.onerror = (error) => {
-            throw new Error(`Event source error: ${error}`)
+            const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+            console.error(`Event source error: ${errorMessage}`);
+            event_src?.close();
+            enableButtons();
         }
     })
     .catch(error => {
-        console.log(error);
+        console.error(error);
         enableButtons();
     });
 };
