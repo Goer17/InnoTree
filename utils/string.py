@@ -29,7 +29,7 @@ class Parser:
                 content=content
             )
         except Exception as e:
-            logger.error(f"Error parsing context from string: {e}")
+            logger.error(f"Error parsing context from string: {e}\n\nDecoding String: {string}")
             return None
     
     @staticmethod

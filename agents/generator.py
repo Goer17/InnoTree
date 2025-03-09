@@ -41,7 +41,7 @@ class Generator:
             )
             for response in responses:
                 ctx = Parser.msg2ctx(response + "[END]")
-                if ctx is None:
+                if ctx is None or ctx.key not in ["reasoning", "search", "idea"]:
                     raise RuntimeError("Format mistake")
                 ctxs.append(ctx)
             return ctxs
