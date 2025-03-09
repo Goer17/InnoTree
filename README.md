@@ -7,6 +7,8 @@
     💡 InnoTree is an advanced agent system specifically designed to integrate Monte Carlo Tree Search (MCTS) techniques, enabling the efficient generation and exploration of innovative scientific ideas.
   </p>
 </div>
+
+
 #### 🤗 Introduction
 
 We introduce **InnoTree**, an agent system designed to facilitate the generation and exploration of innovative scientific ideas. InnoTree integrates Monte Carlo Tree Search (MCTS) techniques to efficiently navigate complex idea spaces, systematically identifying and evaluating promising research directions. By leveraging the probabilistic nature of MCTS, the system strikes a balance between **exploration** and **exploitation**, ensuring a comprehensive yet focused search for high-impact scientific concepts. This framework offers a structured approach to idea development, with considerable potential to accelerate interdisciplinary research and foster novel discoveries. Experimental results demonstrate that InnoTree generates more innovative scientific ideas compared to traditional methods.
