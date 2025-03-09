@@ -88,10 +88,15 @@ class IdeaArenaRewarder(Rewarder):
         total = len(idea_db)
         if total == 0:
             return 0.0, None
-            
-        coro_list = [_reward(idea, other_idea) for other_idea in idea_db]
-        done, pedding = asyncio.run(asyncio.wait(coro_list))
-        wins = sum(task.result() for task in done)
-                
-        return 10 * (wins / total), judges
         
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            task_list = [loop.create_task(_reward(idea, other_idea)) for other_idea in idea_db]
+            done, pending = loop.run_until_complete(asyncio.wait(task_list))
+            wins = sum(task.result() for task in done)
+        finally:
+            loop.close()        
+        return 10 * (wins / total), judges
+

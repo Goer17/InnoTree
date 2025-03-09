@@ -5,7 +5,7 @@ from utils.rag import VanillaRAG
 from tqdm import tqdm
 
 def init_vanilla_rag_from_arxiv(lines: int = 100000):
-    dataset_path = Path("datasets") / "arxiv.json"
+    dataset_path = Path("datasets") / "arxiv.jsonl"
     rag = VanillaRAG()
     with open(dataset_path, "r") as f:
         for _ in tqdm(range(lines), unit="line"):

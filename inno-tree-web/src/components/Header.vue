@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, inject } from 'vue';
 
-const topic = ref('Object Detection');
+const topic = ref('');
 const showSettingModal = ref(false);
 const api_url = inject("api_url");
 

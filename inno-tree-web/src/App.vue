@@ -3,7 +3,7 @@ import Header from "./components/Header.vue";
 import Display from "./components/Display.vue";
 import { ref, provide, toValue } from 'vue';
 
-provide("api_url", "http://127.0.0.1:5000");
+provide("api_url", "http://124.70.167.66:5000");
 
 const tree = ref<any[]>([]);
 
